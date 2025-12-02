@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, Receipt, FileCheck, Edit2, Trash2, FileInput, Search, Plus, Eye, DollarSign, X, Printer, Download, ZoomIn, ZoomOut } from 'lucide-react';
+import { FileText, Receipt, FileCheck, Edit2, Trash2, FileInput, Search, Plus, Eye, DollarSign, X, Printer, Download, ZoomIn, ZoomOut, Wallet } from 'lucide-react';
 import { DocumentData, DocumentType } from '../App';
 import { DocumentPreview } from './DocumentPreview';
 import { generatePDFHTML } from './generate-pdf-html';
@@ -18,8 +18,10 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   const [viewingDocument, setViewingDocument] = useState<DocumentData | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [convertingDocument, setConvertingDocument] = useState<DocumentData | null>(null);
   const [convertingToInvoice, setConvertingToInvoice] = useState<DocumentData | null>(null);
+  const [balanceDocument, setBalanceDocument] = useState<DocumentData | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'VISA' | 'CHEQUE'>('CASH');
   const [paymentType, setPaymentType] = useState<'FULL' | '50%' | 'CUSTOM'>('FULL');
   const [customAmount, setCustomAmount] = useState('');
@@ -84,6 +86,15 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   const openInvoiceModal = (doc: DocumentData) => {
     setConvertingToInvoice(doc);
     setShowInvoiceModal(true);
+  };
+
+  const openBalanceModal = (doc: DocumentData) => {
+    setBalanceDocument(doc);
+    setShowBalanceModal(true);
+    setPaymentMethod('CASH');
+    setPaymentType('FULL');
+    setCustomAmount('');
+    setPaymentReference('');
   };
 
   const handleConvertToInvoice = async () => {
@@ -172,6 +183,63 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
       setConvertingDocument(null);
     } else {
       alert('Failed to convert document. Please try again.');
+    }
+  };
+
+  const handleProcessBalancePayment = async () => {
+    if (!balanceDocument) return;
+
+    // Validate custom amount
+    if (paymentType === 'CUSTOM' && (!customAmount || parseFloat(customAmount) <= 0)) {
+      alert('Please enter a valid custom amount');
+      return;
+    }
+
+    const total = calculateTotal(balanceDocument);
+    const previousPayment = balanceDocument.paymentAmount || 0;
+    const remainingBalance = total - previousPayment;
+    
+    let additionalPayment = remainingBalance;
+    
+    if (paymentType === '50%') {
+      additionalPayment = remainingBalance * 0.5;
+    } else if (paymentType === 'CUSTOM') {
+      additionalPayment = parseFloat(customAmount);
+      
+      // Validate that additional payment doesn't exceed remaining balance
+      if (additionalPayment > remainingBalance) {
+        alert(`Payment amount cannot exceed remaining balance of SCR ${remainingBalance.toFixed(2)}`);
+        return;
+      }
+    }
+
+    const newTotalPaid = previousPayment + additionalPayment;
+    const newPaymentStatus: 'Completed' | 'Deposit Made' = newTotalPaid >= total ? 'Completed' : 'Deposit Made';
+
+    let paymentInfo = `\n\nAdditional Payment on ${new Date().toLocaleDateString()}\nPayment Method: ${paymentMethod}`;
+    if (paymentReference && (paymentMethod === 'VISA' || paymentMethod === 'CHEQUE')) {
+      const referenceLabel = paymentMethod === 'VISA' ? 'Card No.' : 'Cheque No.';
+      paymentInfo += `\n${referenceLabel}: ${paymentReference}`;
+    }
+    paymentInfo += `\nAmount Paid: SCR ${additionalPayment.toFixed(2)}\nTotal Paid: SCR ${newTotalPaid.toFixed(2)}\nRemaining Balance: SCR ${(total - newTotalPaid).toFixed(2)}`;
+
+    const updatedDoc: DocumentData = {
+      ...balanceDocument,
+      notes: balanceDocument.notes + paymentInfo,
+      paymentAmount: newTotalPaid,
+      paymentStatus: newPaymentStatus,
+    };
+
+    const success = await api.saveDocument(updatedDoc);
+    if (success) {
+      onDocumentsChange(documents.map(doc => 
+        doc.documentNumber === balanceDocument.documentNumber ? updatedDoc : doc
+      ));
+      alert(`Payment of SCR ${additionalPayment.toFixed(2)} processed successfully!\nNew Total Paid: SCR ${newTotalPaid.toFixed(2)}`);
+      setShowBalanceModal(false);
+      setBalanceDocument(null);
+    } else {
+      alert('Failed to process payment. Please try again.');
     }
   };
 
@@ -369,6 +437,20 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
                           </button>
                         </>
                       )}
+                      {/* Balance Button for Invoices/Receipts with partial payments */}
+                      {(doc.documentType === 'invoice' || doc.documentType === 'receipt') && 
+                       doc.paymentStatus === 'Deposit Made' && 
+                       doc.paymentAmount !== undefined && 
+                       doc.paymentAmount < calculateTotal(doc) && (
+                        <button
+                          className="flex items-center gap-1 px-3 py-2 text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors text-sm"
+                          title={`Outstanding Balance: SCR ${(calculateTotal(doc) - doc.paymentAmount).toFixed(2)}`}
+                          onClick={() => openBalanceModal(doc)}
+                        >
+                          <Wallet className="w-4 h-4" />
+                          <span>SCR {(calculateTotal(doc) - doc.paymentAmount).toFixed(2)}</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDelete(doc.documentNumber)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -445,7 +527,7 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
                         left: -9999px;
                         top: 0;
                         background: #ffffff;
-                        padding: 40px;
+                        padding: 24px;
                         width: 794px;
                         font-family: system-ui, -apple-system, sans-serif;
                         color: #000000;
@@ -771,6 +853,177 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
               >
                 <FileCheck className="w-5 h-5" />
                 <span>Convert to Invoice</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Balance Modal */}
+      {showBalanceModal && balanceDocument && (
+        <div className="fixed inset-0 backdrop-blur-sm bg-white/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-amber-600 to-amber-700 px-8 py-6 rounded-t-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-white/20 rounded-lg">
+                    <Wallet className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-white text-xl">Outstanding Balance</h2>
+                    <p className="text-amber-100 text-sm">View and manage the balance</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowBalanceModal(false)}
+                  className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-8 space-y-6">
+              {/* Document Info */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-600">Document Number</p>
+                    <p className="text-gray-900">{balanceDocument.documentNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Customer</p>
+                    <p className="text-gray-900">{balanceDocument.customer.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Date</p>
+                    <p className="text-gray-900">{new Date(balanceDocument.date).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Line Items</p>
+                    <p className="text-gray-900">{balanceDocument.lineItems.length} items</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <label className="block text-gray-700 mb-3">Payment Method</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {['CASH', 'VISA', 'CHEQUE'].map((method) => (
+                    <button
+                      key={method}
+                      onClick={() => setPaymentMethod(method as 'CASH' | 'VISA' | 'CHEQUE')}
+                      className={`px-4 py-3 rounded-lg border-2 transition-all ${
+                        paymentMethod === method
+                          ? 'border-amber-500 bg-amber-50 text-amber-700'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      {method === 'CASH' && '💵'}
+                      {method === 'VISA' && '💳'}
+                      {method === 'CHEQUE' && '📝'}
+                      <span className="ml-2">{method === 'CASH' ? 'Cash' : method === 'VISA' ? 'Card' : 'Cheque'}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reference Number */}
+              {(paymentMethod === 'VISA' || paymentMethod === 'CHEQUE') && (
+                <div>
+                  <label className="block text-gray-700 mb-2">
+                    {paymentMethod === 'VISA' ? 'Card Number' : 'Cheque Number'}
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    placeholder={paymentMethod === 'VISA' ? 'Enter card number' : 'Enter cheque number'}
+                  />
+                </div>
+              )}
+
+              {/* Payment Type */}
+              <div>
+                <label className="block text-gray-700 mb-3">Payment Type</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { value: 'FULL', label: 'Full Payment', icon: '✓' },
+                    { value: '50%', label: '50% Payment', icon: '½' },
+                    { value: 'CUSTOM', label: 'Custom Amount', icon: '✎' },
+                  ].map((type) => (
+                    <button
+                      key={type.value}
+                      onClick={() => setPaymentType(type.value as 'FULL' | '50%' | 'CUSTOM')}
+                      className={`px-4 py-3 rounded-lg border-2 transition-all ${
+                        paymentType === type.value
+                          ? 'border-amber-500 bg-amber-50 text-amber-700'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className="mr-2">{type.icon}</span>
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Amount */}
+              {paymentType === 'CUSTOM' && (
+                <div>
+                  <label className="block text-gray-700 mb-2">Custom Amount</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                    <input
+                      type="number"
+                      value={customAmount}
+                      onChange={(e) => setCustomAmount(e.target.value)}
+                      className="w-full pl-8 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      placeholder="0.00"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Summary */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 space-y-3">
+                <div className="flex items-center justify-between text-gray-700">
+                  <span>Document Total</span>
+                  <span className="text-gray-900">SCR {calculateTotal(balanceDocument).toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between border-t border-amber-200 pt-3">
+                  <span className="text-amber-900">Amount Paid</span>
+                  <span className="text-2xl text-amber-900">
+                    SCR {balanceDocument.paymentAmount?.toFixed(2) || '0.00'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-t border-amber-200 pt-3">
+                  <span className="text-amber-900">Outstanding Balance</span>
+                  <span className="text-2xl text-amber-900">
+                    SCR {(calculateTotal(balanceDocument) - (balanceDocument.paymentAmount || 0)).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-8 py-6 bg-gray-50 border-t rounded-b-xl">
+              <button
+                onClick={() => setShowBalanceModal(false)}
+                className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleProcessBalancePayment}
+                className="flex items-center gap-2 px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                <Wallet className="w-5 h-5" />
+                <span>Process Payment</span>
               </button>
             </div>
           </div>
