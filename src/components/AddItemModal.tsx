@@ -28,6 +28,7 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
     accessories: '',
   });
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [basePrice, setBasePrice] = useState<number>(0); // Track base product price
 
   useEffect(() => {
     if (editingItem) {
@@ -113,29 +114,66 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
             colour: product.color,
             description: `${product.name} - ${product.material}${formData.colour ? ', ' + formData.colour : ''}${formData.glass ? ', ' + formData.glass : ''}${formData.style ? ', ' + formData.style : ''}`,
           });
+          setBasePrice(product.pricePerSqm); // Set base price
         }
       }
     }
   };
 
   // Update description when selections change
-  const updateDescription = (updates: Partial<typeof formData>) => {
-    const newFormData = { ...formData, ...updates };
-    const product = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
-    const parts = [];
+  const handleDescriptionChange = (newFormData: Partial<Omit<LineItem, 'id'>>) => {
+    // Merge with existing formData
+    const merged = { ...formData, ...newFormData };
     
-    if (product) {
-      parts.push(product.name, product.material);
+    // Build description from selected options
+    const parts: string[] = [];
+    
+    // Use base name if available
+    if (selectedProductId && merged.type !== 'accessories') {
+      const product = products.find(p => p.id === selectedProductId);
+      if (product) {
+        parts.push(product.name);
+      }
     }
     
-    if (newFormData.colour) parts.push(newFormData.colour);
-    if (newFormData.glass) parts.push(newFormData.glass);
-    if (newFormData.style) parts.push(newFormData.style);
-    if (newFormData.accessories) parts.push(newFormData.accessories);
+    if (merged.colour) parts.push(merged.colour);
+    if (merged.glass) parts.push(merged.glass);
+    if (merged.style) parts.push(merged.style);
+    if (merged.accessories) parts.push(merged.accessories);
+    
+    // Calculate total price per sqm including glass and style
+    let totalPrice = basePrice;
+    
+    // Add glass price if selected
+    if (merged.glass) {
+      const selectedGlass = glass.find(g => g.name === merged.glass);
+      if (selectedGlass) {
+        totalPrice += selectedGlass.pricePerSqm;
+      }
+    }
+    
+    // Add style price if selected
+    if (merged.style) {
+      const selectedStyle = styles.find(s => s.name === merged.style);
+      if (selectedStyle) {
+        totalPrice += selectedStyle.pricePerSqm;
+      }
+    }
+    
+    // Calculate accessory price (total, not per sqm)
+    let accessoryPrice = 0;
+    if (merged.accessories) {
+      const selectedAccessory = accessories.find(a => a.name === merged.accessories);
+      if (selectedAccessory) {
+        accessoryPrice = selectedAccessory.price * merged.quantity;
+      }
+    }
     
     setFormData({
-      ...newFormData,
+      ...merged,
       description: parts.join(', '),
+      pricePerSqm: totalPrice,
+      accessoryPrice: accessoryPrice,
     });
   };
 
@@ -151,11 +189,15 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
   };
 
   const calculateArea = () => {
-    return (formData.width * formData.height).toFixed(2);
+    return ((formData.width * formData.height) / 1000000).toFixed(2);
   };
 
   const calculateTotal = () => {
-    return (formData.width * formData.height * formData.quantity * formData.pricePerSqm).toFixed(2);
+    const area = (formData.width * formData.height) / 1000000; // Area in m²
+    const priceForOne = area * formData.pricePerSqm; // Price for one item
+    const areaTotal = priceForOne * formData.quantity; // Total for all items
+    const accessoryTotal = formData.accessoryPrice || 0;
+    return (areaTotal + accessoryTotal).toFixed(2);
   };
 
   if (!isOpen) return null;
@@ -268,12 +310,12 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
                   <label className="block text-gray-600 text-sm mb-2">Colour</label>
                   <select
                     value={formData.colour}
-                    onChange={(e) => updateDescription({ colour: e.target.value })}
+                    onChange={(e) => handleDescriptionChange({ colour: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select a colour</option>
-                    {colourOptions.map(color => (
-                      <option key={color} value={color}>
+                    {colourOptions.map((color, index) => (
+                      <option key={`color-${index}-${color}`} value={color}>
                         {color}
                       </option>
                     ))}
@@ -283,12 +325,12 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
                   <label className="block text-gray-600 text-sm mb-2">Glass</label>
                   <select
                     value={formData.glass}
-                    onChange={(e) => updateDescription({ glass: e.target.value })}
+                    onChange={(e) => handleDescriptionChange({ glass: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select glass type</option>
-                    {glassOptions.map(glassType => (
-                      <option key={glassType} value={glassType}>
+                    {glassOptions.map((glassType, index) => (
+                      <option key={`glass-${index}-${glassType}`} value={glassType}>
                         {glassType}
                       </option>
                     ))}
@@ -298,12 +340,12 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
                   <label className="block text-gray-600 text-sm mb-2">Style</label>
                   <select
                     value={formData.style}
-                    onChange={(e) => updateDescription({ style: e.target.value })}
+                    onChange={(e) => handleDescriptionChange({ style: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select a style</option>
-                    {styleOptions.map(style => (
-                      <option key={style} value={style}>
+                    {styleOptions.map((style, index) => (
+                      <option key={`style-${index}-${style}`} value={style}>
                         {style}
                       </option>
                     ))}
@@ -313,12 +355,12 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
                   <label className="block text-gray-600 text-sm mb-2">Accessories</label>
                   <select
                     value={formData.accessories}
-                    onChange={(e) => updateDescription({ accessories: e.target.value })}
+                    onChange={(e) => handleDescriptionChange({ accessories: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select accessories</option>
-                    {accessoryOptions.map(accessory => (
-                      <option key={accessory} value={accessory}>
+                    {accessoryOptions.map((accessory, index) => (
+                      <option key={`accessory-${index}-${accessory}`} value={accessory}>
                         {accessory}
                       </option>
                     ))}
@@ -332,26 +374,26 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
               <label className="block text-gray-700 mb-4">Dimensions</label>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-600 text-sm mb-2">Width (meters)</label>
+                  <label className="block text-gray-600 text-sm mb-2">Width (millimeters)</label>
                   <input
                     type="number"
                     value={formData.width || ''}
                     onChange={(e) => setFormData({ ...formData, width: parseFloat(e.target.value) || 0 })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="0.0"
-                    step="0.1"
+                    placeholder="0"
+                    step="1"
                     min="0"
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-600 text-sm mb-2">Height (meters)</label>
+                  <label className="block text-gray-600 text-sm mb-2">Height (millimeters)</label>
                   <input
                     type="number"
                     value={formData.height || ''}
                     onChange={(e) => setFormData({ ...formData, height: parseFloat(e.target.value) || 0 })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="0.0"
-                    step="0.1"
+                    placeholder="0"
+                    step="1"
                     min="0"
                   />
                 </div>
@@ -373,7 +415,18 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
                 <input
                   type="number"
                   value={formData.quantity || ''}
-                  onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => {
+                    const newQuantity = parseInt(e.target.value) || 0;
+                    // Recalculate accessory price when quantity changes
+                    let accessoryPrice = formData.accessoryPrice || 0;
+                    if (formData.accessories) {
+                      const selectedAccessory = accessories.find(a => a.name === formData.accessories);
+                      if (selectedAccessory) {
+                        accessoryPrice = selectedAccessory.price * newQuantity;
+                      }
+                    }
+                    setFormData({ ...formData, quantity: newQuantity, accessoryPrice });
+                  }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="1"
                   min="1"
@@ -382,12 +435,12 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
               <div>
                 <label className="block text-gray-700 mb-2">Price per m²</label>
                 <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">SCR</span>
                   <input
                     type="number"
-                    value={formData.pricePerSqm || ''}
+                    value={formData.pricePerSqm}
                     onChange={(e) => setFormData({ ...formData, pricePerSqm: parseFloat(e.target.value) || 0 })}
-                    className="w-full pl-8 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full pl-14 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="0.00"
                     step="0.01"
                     min="0"
@@ -400,12 +453,18 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
             {formData.width > 0 && formData.height > 0 && formData.pricePerSqm > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 space-y-3">
                 <div className="flex items-center justify-between text-gray-700">
-                  <span>Area ({calculateArea()} m² × {formData.quantity})</span>
-                  <span className="text-gray-900">${(parseFloat(calculateArea()) * formData.quantity * formData.pricePerSqm).toFixed(2)}</span>
+                  <span>Sub-Total</span>
+                  <span className="text-gray-900">SCR {(((formData.width * formData.height) / 1000000 * formData.pricePerSqm) * formData.quantity).toFixed(2)}</span>
                 </div>
+                {formData.accessoryPrice && formData.accessoryPrice > 0 && (
+                  <div className="flex items-center justify-between text-gray-700">
+                    <span>Accessories</span>
+                    <span className="text-gray-900">SCR {formData.accessoryPrice.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between border-t border-blue-200 pt-3">
                   <span className="text-blue-900">Line Total</span>
-                  <span className="text-2xl text-blue-900">${calculateTotal()}</span>
+                  <span className="text-2xl text-blue-900">SCR {calculateTotal()}</span>
                 </div>
               </div>
             )}

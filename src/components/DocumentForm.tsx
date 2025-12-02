@@ -329,11 +329,11 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
                     <div className="grid grid-cols-2 gap-x-8 gap-y-3 bg-white rounded-lg p-4 border border-gray-200">
                       <div className="flex justify-between items-center">
                         <span className="text-gray-600">Dimensions:</span>
-                        <span className="text-gray-900">{item.width.toFixed(2)}m × {item.height.toFixed(2)}m</span>
+                        <span className="text-gray-900">{item.width.toFixed(0)}mm × {item.height.toFixed(0)}mm</span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-gray-600">Area:</span>
-                        <span className="text-gray-900">{(item.width * item.height).toFixed(2)} m²</span>
+                        <span className="text-gray-900">{((item.width * item.height) / 1000000).toFixed(2)} m²</span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-gray-600">Quantity:</span>
@@ -341,7 +341,7 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-gray-600">Price/m²:</span>
-                        <span className="text-gray-900">${item.pricePerSqm.toFixed(2)}</span>
+                        <span className="text-gray-900">SCR {item.pricePerSqm.toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -365,7 +365,9 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
                 <div className="pt-4 border-t border-gray-300">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-700">Line Total:</span>
-                    <span className="text-xl text-blue-600">${(item.width * item.height * item.quantity * item.pricePerSqm).toFixed(2)}</span>
+                    <span className="text-xl text-blue-600">
+                      SCR {(((item.width * item.height / 1000000) * item.pricePerSqm) * item.quantity + (item.accessoryPrice || 0)).toFixed(2)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -410,28 +412,25 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
               </label>
               <div className="relative">
                 <input
-                  type="number"
-                  value={documentData.taxRate || ''}
-                  onChange={(e) => onDataChange({ ...documentData, taxRate: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-4 py-3 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="0"
-                  step="0.1"
-                  min="0"
+                  type="text"
+                  value="15"
+                  readOnly
+                  className="w-full px-4 py-3 pr-8 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed text-gray-700"
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">%</span>
               </div>
             </div>
             <div>
               <label className="block text-gray-700 mb-2">
-                Discount ($)
+                Discount (SCR)
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">SCR</span>
                 <input
                   type="number"
                   value={documentData.discount || ''}
                   onChange={(e) => onDataChange({ ...documentData, discount: parseFloat(e.target.value) || 0 })}
-                  className="w-full pl-8 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-14 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="0.00"
                   step="0.01"
                   min="0"

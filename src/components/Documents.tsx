@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { FileText, Receipt, FileCheck, Edit2, Trash2, FileInput, Search, Plus, Eye, DollarSign, X } from 'lucide-react';
+import { FileText, Receipt, FileCheck, Edit2, Trash2, FileInput, Search, Plus, Eye, DollarSign, X, Printer, Download, ZoomIn, ZoomOut } from 'lucide-react';
 import { DocumentData, DocumentType } from '../App';
 import { DocumentPreview } from './DocumentPreview';
+import { generatePDFHTML } from './generate-pdf-html';
 import * as api from '../utils/api';
 
 interface DocumentsProps {
@@ -23,11 +24,7 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   const [paymentType, setPaymentType] = useState<'FULL' | '50%' | 'CUSTOM'>('FULL');
   const [customAmount, setCustomAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
-  const [showBalanceModal, setShowBalanceModal] = useState(false);
-  const [balanceReceipt, setBalanceReceipt] = useState<DocumentData | null>(null);
-  const [balanceAmount, setBalanceAmount] = useState('');
-  const [balancePaymentMethod, setBalancePaymentMethod] = useState<'CASH' | 'VISA' | 'CHEQUE'>('CASH');
-  const [balancePaymentReference, setBalancePaymentReference] = useState('');
+  const [zoomLevel, setZoomLevel] = useState(100);
 
   const filteredDocuments = documents.filter(doc => {
     const matchesType = filterType === 'all' || doc.documentType === filterType;
@@ -84,15 +81,6 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
     setPaymentReference('');
   };
 
-  const openBalanceModal = (doc: DocumentData) => {
-    setBalanceReceipt(doc);
-    setShowBalanceModal(true);
-    setBalancePaymentMethod('CASH');
-    const remainingBalance = calculateTotal(doc) - (doc.paymentAmount || 0);
-    setBalanceAmount(remainingBalance.toFixed(2));
-    setBalancePaymentReference('');
-  };
-
   const openInvoiceModal = (doc: DocumentData) => {
     setConvertingToInvoice(doc);
     setShowInvoiceModal(true);
@@ -126,64 +114,6 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
       setConvertingToInvoice(null);
     } else {
       alert('Failed to convert document. Please try again.');
-    }
-  };
-
-  const handleBalancePayment = async () => {
-    if (!balanceReceipt) return;
-
-    // Validate balance amount
-    if (!balanceAmount || parseFloat(balanceAmount) <= 0) {
-      alert('Please enter a valid payment amount');
-      return;
-    }
-
-    const total = calculateTotal(balanceReceipt);
-    const currentPaid = balanceReceipt.paymentAmount || 0;
-    const paymentAmount = parseFloat(balanceAmount);
-    const newTotalPaid = currentPaid + paymentAmount;
-
-    // Round to 2 decimal places to avoid floating-point precision issues
-    const roundedNewTotalPaid = Math.round(newTotalPaid * 100) / 100;
-    const roundedTotal = Math.round(total * 100) / 100;
-
-    // Check if payment exceeds remaining balance
-    if (roundedNewTotalPaid > roundedTotal) {
-      alert(`Payment amount exceeds remaining balance. Remaining: $${(total - currentPaid).toFixed(2)}`);
-      return;
-    }
-
-    // Determine new payment status
-    const newPaymentStatus: 'Completed' | 'Deposit Made' = roundedNewTotalPaid >= roundedTotal ? 'Completed' : 'Deposit Made';
-
-    // Add payment information to notes
-    let paymentInfo = `\n\nBalance Payment (${new Date().toLocaleDateString()})`;
-    paymentInfo += `\nPayment Method: ${balancePaymentMethod}`;
-    if (balancePaymentReference && (balancePaymentMethod === 'VISA' || balancePaymentMethod === 'CHEQUE')) {
-      const referenceLabel = balancePaymentMethod === 'VISA' ? 'Card No.' : 'Cheque No.';
-      paymentInfo += `\n${referenceLabel}: ${balancePaymentReference}`;
-    }
-    paymentInfo += `\nAmount Paid: $${paymentAmount.toFixed(2)}`;
-    paymentInfo += `\nTotal Paid: $${newTotalPaid.toFixed(2)} / $${total.toFixed(2)}`;
-
-    const updatedDoc: DocumentData = {
-      ...balanceReceipt,
-      paymentAmount: newTotalPaid,
-      paymentStatus: newPaymentStatus,
-      notes: balanceReceipt.notes + paymentInfo,
-    };
-
-    const success = await api.saveDocument(updatedDoc);
-    if (success) {
-      const updatedDocuments = documents.map(doc => 
-        doc.documentNumber === balanceReceipt.documentNumber ? updatedDoc : doc
-      );
-      onDocumentsChange(updatedDocuments);
-      alert(`Balance payment recorded successfully. Status: ${newPaymentStatus}`);
-      setShowBalanceModal(false);
-      setBalanceReceipt(null);
-    } else {
-      alert('Failed to record payment. Please try again.');
     }
   };
 
@@ -259,12 +189,17 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   };
 
   const calculateTotal = (doc: DocumentData) => {
-    const subtotal = doc.lineItems.reduce((sum, item) => {
-      return sum + (item.width * item.height * item.quantity * item.pricePerSqm);
+    const itemsTotal = doc.lineItems.reduce((sum, item) => {
+      const area = (item.width * item.height) / 1000000; // Area in m²
+      const priceForOne = area * item.pricePerSqm; // Price for one item
+      const areaTotal = priceForOne * item.quantity; // Total for all items
+      const accessoryTotal = item.accessoryPrice || 0;
+      return sum + areaTotal + accessoryTotal;
     }, 0);
-    const subtotalAfterDiscount = subtotal - doc.discount;
-    const taxAmount = (subtotalAfterDiscount * doc.taxRate) / 100;
-    return subtotalAfterDiscount + taxAmount;
+    const totalWithTax = itemsTotal - doc.discount; // This is the tax-inclusive total
+    const subtotal = totalWithTax / 1.15; // Back-calculate subtotal (pre-tax amount)
+    const taxAmount = totalWithTax - subtotal; // Tax is the difference
+    return totalWithTax;
   };
 
   return (
@@ -394,7 +329,7 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
                   </td>
                   <td className="px-6 py-4 text-gray-700">{doc.lineItems.length}</td>
                   <td className="px-6 py-4 text-right text-gray-900">
-                    ${doc.documentType === 'receipt' && doc.paymentAmount !== undefined
+                    SCR {doc.documentType === 'receipt' && doc.paymentAmount !== undefined
                       ? doc.paymentAmount.toFixed(2)
                       : calculateTotal(doc).toFixed(2)}
                   </td>
@@ -434,16 +369,6 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
                           </button>
                         </>
                       )}
-                      {doc.documentType === 'receipt' && doc.paymentStatus === 'Deposit Made' && (
-                        <button
-                          onClick={() => openBalanceModal(doc)}
-                          className="flex items-center gap-1 px-3 py-2 text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors text-sm"
-                          title="Record Balance Payment"
-                        >
-                          <DollarSign className="w-4 h-4" />
-                          <span>Balance</span>
-                        </button>
-                      )}
                       <button
                         onClick={() => handleDelete(doc.documentNumber)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -462,19 +387,133 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
 
       {/* Document Preview Modal */}
       {viewingDocument && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-auto">
-            <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
-              <h2 className="text-gray-900">Document Preview</h2>
-              <button
-                onClick={() => setViewingDocument(null)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-              >
-                Close
-              </button>
+        <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-8">
+          <div className="bg-gray-100 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-y-auto flex flex-col">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10 rounded-t-2xl">
+              <div className="flex items-center gap-4">
+                <h2 className="text-gray-900">Document Preview</h2>
+                
+                {/* Zoom Controls */}
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg">
+                  <button
+                    onClick={() => setZoomLevel(Math.max(50, zoomLevel - 10))}
+                    disabled={zoomLevel <= 50}
+                    className="p-1.5 text-gray-700 hover:bg-white rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Zoom out"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  
+                  <div className="px-3 py-1 bg-white rounded text-sm text-gray-700 min-w-[60px] text-center">
+                    {zoomLevel}%
+                  </div>
+                  
+                  <button
+                    onClick={() => setZoomLevel(Math.min(200, zoomLevel + 10))}
+                    disabled={zoomLevel >= 200}
+                    className="p-1.5 text-gray-700 hover:bg-white rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Zoom in"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  
+                  {zoomLevel !== 100 && (
+                    <button
+                      onClick={() => setZoomLevel(100)}
+                      className="ml-1 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                      title="Reset zoom"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      // Import libraries
+                      const { default: jsPDF } = await import('jspdf');
+                      const { default: html2canvas } = await import('html2canvas');
+                      
+                      // Create a clean HTML structure with inline styles (no Tailwind classes)
+                      const wrapper = document.createElement('div');
+                      wrapper.style.cssText = `
+                        position: absolute;
+                        left: -9999px;
+                        top: 0;
+                        background: #ffffff;
+                        padding: 40px;
+                        width: 794px;
+                        font-family: system-ui, -apple-system, sans-serif;
+                        color: #000000;
+                      `;
+
+                      wrapper.innerHTML = generatePDFHTML(viewingDocument);
+                      
+                      document.body.appendChild(wrapper);
+
+                      const canvas = await html2canvas(wrapper, {
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        backgroundColor: '#ffffff'
+                      });
+
+                      document.body.removeChild(wrapper);
+
+                      const imgData = canvas.toDataURL('image/png');
+                      const pdf = new jsPDF('p', 'mm', 'a4');
+                      const pdfWidth = pdf.internal.pageSize.getWidth();
+                      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+                      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                      pdf.save(`${viewingDocument.documentNumber}.pdf`);
+                    } catch (error) {
+                      console.error('Error generating PDF:', error);
+                      alert('Failed to generate PDF. Please try again.');
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print
+                </button>
+                <button
+                  onClick={() => {
+                    setViewingDocument(null);
+                    setZoomLevel(100);
+                  }}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-            <div className="p-6">
-              <DocumentPreview documentData={viewingDocument} />
+            
+            {/* A4 Paper Container */}
+            <div className="flex-1 overflow-y-auto py-8 px-6 flex justify-center">
+              <div 
+                className="bg-white shadow-2xl"
+                style={{ 
+                  width: '794px',
+                  minHeight: '1123px',
+                  maxWidth: '100%',
+                  transform: `scale(${zoomLevel / 100})`,
+                  transformOrigin: 'top left'
+                }}
+              >
+                <DocumentPreview documentData={viewingDocument} />
+              </div>
             </div>
           </div>
         </div>
@@ -649,148 +688,6 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
               >
                 <Receipt className="w-5 h-5" />
                 <span>Convert to Receipt</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Balance Payment Modal */}
-      {showBalanceModal && balanceReceipt && (
-        <div className="fixed inset-0 backdrop-blur-sm bg-white/30 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-orange-600 to-orange-700 px-8 py-6 rounded-t-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-white/20 rounded-lg">
-                    <DollarSign className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-white text-xl">Record Balance Payment</h2>
-                    <p className="text-orange-100 text-sm">Complete the remaining payment</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowBalanceModal(false)}
-                  className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="p-8 space-y-6">
-              {/* Receipt Info */}
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-600">Receipt Number</p>
-                    <p className="text-gray-900">{balanceReceipt.documentNumber}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Customer</p>
-                    <p className="text-gray-900">{balanceReceipt.customer.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Original Date</p>
-                    <p className="text-gray-900">{new Date(balanceReceipt.date).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Payment Status</p>
-                    <p className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full inline-block text-sm">Deposit Made</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Summary */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-700">Total Amount</span>
-                  <span className="text-gray-900 text-lg">${calculateTotal(balanceReceipt).toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between border-t border-blue-200 pt-2">
-                  <span className="text-gray-700">Already Paid</span>
-                  <span className="text-green-600">${balanceReceipt.paymentAmount ? balanceReceipt.paymentAmount.toFixed(2) : '0.00'}</span>
-                </div>
-                <div className="flex items-center justify-between border-t border-blue-200 pt-2">
-                  <span className="text-blue-900">Remaining Balance</span>
-                  <span className="text-2xl text-blue-900">
-                    ${(calculateTotal(balanceReceipt) - (balanceReceipt.paymentAmount || 0)).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Payment Method */}
-              <div>
-                <label className="block text-gray-700 mb-3">Payment Method</label>
-                <div className="grid grid-cols-3 gap-3">
-                  {['CASH', 'VISA', 'CHEQUE'].map((method) => (
-                    <button
-                      key={method}
-                      onClick={() => setBalancePaymentMethod(method as 'CASH' | 'VISA' | 'CHEQUE')}
-                      className={`px-4 py-3 rounded-lg border-2 transition-all ${
-                        balancePaymentMethod === method
-                          ? 'border-orange-500 bg-orange-50 text-orange-700'
-                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-                      }`}
-                    >
-                      {method === 'CASH' && '💵'}
-                      {method === 'VISA' && '💳'}
-                      {method === 'CHEQUE' && '📝'}
-                      <span className="ml-2">{method === 'CASH' ? 'Cash' : method === 'VISA' ? 'Card' : 'Cheque'}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Reference Number */}
-              {(balancePaymentMethod === 'VISA' || balancePaymentMethod === 'CHEQUE') && (
-                <div>
-                  <label className="block text-gray-700 mb-2">
-                    {balancePaymentMethod === 'VISA' ? 'Card Number' : 'Cheque Number'}
-                  </label>
-                  <input
-                    type="text"
-                    value={balancePaymentReference}
-                    onChange={(e) => setBalancePaymentReference(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder={balancePaymentMethod === 'VISA' ? 'Enter card number' : 'Enter cheque number'}
-                  />
-                </div>
-              )}
-
-              {/* Payment Amount */}
-              <div>
-                <label className="block text-gray-700 mb-2">Payment Amount</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-                  <input
-                    type="number"
-                    value={balanceAmount}
-                    onChange={(e) => setBalanceAmount(e.target.value)}
-                    className="w-full pl-8 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="0.00"
-                    step="0.01"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-end gap-3 px-8 py-6 bg-gray-50 border-t rounded-b-xl">
-              <button
-                onClick={() => setShowBalanceModal(false)}
-                className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleBalancePayment}
-                className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                <DollarSign className="w-5 h-5" />
-                <span>Record Payment</span>
               </button>
             </div>
           </div>

@@ -232,7 +232,7 @@ export function Customers({ customers, onCustomersChange }: CustomersProps) {
                   {customer.totalOrders}
                 </td>
                 <td className="px-6 py-4 text-right text-gray-900">
-                  ${customer.totalSpent.toLocaleString()}
+                  SCR {customer.totalSpent.toLocaleString()}
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex gap-2 justify-end">

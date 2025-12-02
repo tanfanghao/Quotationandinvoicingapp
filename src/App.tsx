@@ -87,6 +87,7 @@ export interface LineItem {
   glass?: string;
   style?: string;
   accessories?: string;
+  accessoryPrice?: number; // Total price for accessories (price * quantity)
 }
 
 export interface DocumentData {
@@ -125,12 +126,13 @@ export default function App() {
       totalSpent: 0,
     },
     lineItems: [],
-    taxRate: 10,
+    taxRate: 15,
     discount: 0,
     notes: '',
   });
   const [savedDocuments, setSavedDocuments] = useState<DocumentData[]>([]);
   const [isEditingDocument, setIsEditingDocument] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
   const [storageMode, setStorageMode] = useState<'backend' | 'local'>(api.getStorageModePreference());
 
@@ -280,7 +282,7 @@ export default function App() {
         totalSpent: 0,
       },
       lineItems: [],
-      taxRate: 10,
+      taxRate: 15,
       discount: 0,
       notes: '',
     });
@@ -310,7 +312,7 @@ export default function App() {
         totalSpent: 0,
       },
       lineItems: [],
-      taxRate: 10,
+      taxRate: 15,
       discount: 0,
       notes: '',
     });
@@ -349,7 +351,7 @@ export default function App() {
         totalSpent: 0,
       },
       lineItems: [],
-      taxRate: 10,
+      taxRate: 15,
       discount: 0,
       notes: '',
     });
@@ -367,54 +369,61 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
+      <header className="bg-white/80 backdrop-blur-md shadow-sm border-b border-slate-200/60 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-gray-900">Aluminum Windows & Doors</h1>
-              <p className="text-gray-600 mt-1">Create professional quotations, invoices, and receipts</p>
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/25">
+                  <Package className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-gray-900 tracking-tight">Aluminum Windows & Doors</h1>
+                  <p className="text-gray-500 mt-0.5 text-sm">Professional quotations, invoices, and receipts</p>
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-3">
               {/* Storage Mode Toggle Button */}
               <button
                 onClick={handleToggleStorageMode}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 transition-colors text-gray-700 border-gray-300"
+                className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl border bg-white hover:bg-gray-50 transition-all duration-200 text-gray-700 border-gray-200 shadow-sm hover:shadow hover:border-gray-300"
                 title={`Switch to ${storageMode === 'backend' ? 'Local Storage' : 'Backend Database'}`}
               >
                 {storageMode === 'backend' ? (
                   <>
-                    <Database className="w-4 h-4" />
-                    <span className="text-sm">Use Database</span>
+                    <Database className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm">Database</span>
                   </>
                 ) : (
                   <>
-                    <HardDrive className="w-4 h-4" />
-                    <span className="text-sm">Use Local</span>
+                    <HardDrive className="w-4 h-4 text-slate-600" />
+                    <span className="text-sm">Local</span>
                   </>
                 )}
               </button>
               
               {/* Status Indicator */}
               {backendConnected !== null && (
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${
+                <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border shadow-sm ${
                   storageMode === 'local'
-                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                    ? 'bg-gradient-to-br from-blue-50 to-blue-100/50 border-blue-200/60 text-blue-700'
                     : backendConnected 
-                      ? 'bg-green-50 border-green-200 text-green-700' 
-                      : 'bg-orange-50 border-orange-200 text-orange-700'
+                      ? 'bg-gradient-to-br from-emerald-50 to-emerald-100/50 border-emerald-200/60 text-emerald-700' 
+                      : 'bg-gradient-to-br from-amber-50 to-amber-100/50 border-amber-200/60 text-amber-700'
                 }`}>
-                  <div className={`w-2 h-2 rounded-full ${
+                  <div className={`w-2 h-2 rounded-full shadow-sm ${
                     storageMode === 'local'
-                      ? 'bg-blue-500'
-                      : backendConnected ? 'bg-green-500' : 'bg-orange-500'
+                      ? 'bg-blue-500 shadow-blue-400/50'
+                      : backendConnected ? 'bg-emerald-500 shadow-emerald-400/50' : 'bg-amber-500 shadow-amber-400/50'
                   }`}></div>
                   <span className="text-sm">
                     {storageMode === 'local' 
-                      ? 'Using Local Storage' 
+                      ? 'Local Storage' 
                       : backendConnected 
-                        ? 'Database Connected' 
-                        : 'Database Unavailable'}
+                        ? 'Connected' 
+                        : 'Offline'}
                   </span>
                 </div>
               )}
@@ -424,23 +433,28 @@ export default function App() {
       </header>
 
       {/* Navigation Bar */}
-      <nav className="bg-white border-b sticky top-0 z-10">
+      <nav className="bg-white/90 backdrop-blur-md border-b border-slate-200/60 sticky top-[89px] z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex gap-1">
+          <div className="flex gap-2">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
                   key={item.id}
                   onClick={() => setCurrentPage(item.id)}
-                  className={`flex items-center gap-2 px-6 py-4 border-b-2 transition-all ${
+                  className={`flex items-center gap-2.5 px-5 py-3.5 border-b-2 transition-all duration-200 relative group ${
                     currentPage === item.id
-                      ? 'border-blue-500 text-blue-600 bg-blue-50/50'
-                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                      ? 'border-blue-600 text-blue-700 bg-blue-50/50'
+                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50/50'
                   }`}
                 >
-                  <Icon className="w-5 h-5" />
-                  <span>{item.label}</span>
+                  <Icon className={`w-4.5 h-4.5 transition-transform duration-200 ${
+                    currentPage === item.id ? 'scale-110' : 'group-hover:scale-105'
+                  }`} />
+                  <span className="text-sm">{item.label}</span>
+                  {currentPage === item.id && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-600 to-blue-500 rounded-full"></div>
+                  )}
                 </button>
               );
             })}
@@ -462,14 +476,19 @@ export default function App() {
           <>
             {/* Action Buttons */}
             {isEditingDocument && (
-              <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-blue-700">
-                  <Edit2 className="w-5 h-5" />
-                  <span>Editing document: {documentData.documentNumber}</span>
+              <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-3 text-blue-700">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Edit2 className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <div className="text-sm">Editing Document</div>
+                    <div className="text-blue-900">{documentData.documentNumber}</div>
+                  </div>
                 </div>
                 <button
                   onClick={handleNewDocument}
-                  className="px-4 py-2 bg-white text-blue-600 rounded-lg hover:bg-blue-100 transition-colors border border-blue-300"
+                  className="px-4 py-2.5 bg-white text-blue-600 rounded-xl hover:bg-blue-50 transition-all duration-200 border border-blue-200 shadow-sm hover:shadow"
                 >
                   Cancel & Create New
                 </button>
@@ -490,10 +509,21 @@ export default function App() {
                   colours={colours}
                   accessories={accessories}
                 />
+                
+                {/* Preview Button for Mobile - Only show on mobile */}
+                <div className="mt-6 lg:hidden">
+                  <button
+                    onClick={() => setShowPreviewModal(true)}
+                    className="w-full px-6 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <FileText className="w-5 h-5" />
+                    Show Preview
+                  </button>
+                </div>
               </div>
 
-              {/* Preview Section */}
-              <div className="lg:sticky lg:top-8 h-fit">
+              {/* Preview Section - Desktop: Inline Preview */}
+              <div className="hidden lg:block lg:sticky lg:top-8 h-fit">
                 <DocumentPreview 
                   documentData={documentData} 
                   onSave={handleSaveDocument}
@@ -520,6 +550,30 @@ export default function App() {
         
         {currentPage === 'styles' && <Styles styles={styles} onStylesChange={setStyles} colours={colours} onColoursChange={setColours} />}
       </div>
+
+      {/* Preview Modal */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          {/* Backdrop with blur */}
+          <div 
+            className="fixed inset-0 bg-white/10 backdrop-blur-md transition-all"
+            onClick={() => setShowPreviewModal(false)}
+          ></div>
+          
+          {/* Modal Content */}
+          <div className="flex min-h-screen items-center justify-center p-4">
+            <div className="relative bg-white rounded-2xl shadow-2xl max-w-5xl w-full mx-auto max-h-[90vh] overflow-hidden">
+              <DocumentPreview 
+                documentData={documentData} 
+                onSave={handleSaveDocument}
+                onNew={handleNewDocument}
+                isEditing={isEditingDocument}
+                onClose={() => setShowPreviewModal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
