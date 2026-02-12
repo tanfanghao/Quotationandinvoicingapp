@@ -15,9 +15,11 @@ interface DocumentFormProps {
   styles: Style[];
   colours: Colour[];
   accessories: Accessory[];
+  onSave?: () => void;
+  isEditing?: boolean;
 }
 
-export function DocumentForm({ documentData, onDataChange, products, customers, onCustomersChange, glass, styles, colours, accessories }: DocumentFormProps) {
+export function DocumentForm({ documentData, onDataChange, products, customers, onCustomersChange, glass, styles, colours, accessories, onSave, isEditing }: DocumentFormProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<LineItem | null>(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -112,6 +114,28 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
       ...documentData,
       lineItems: documentData.lineItems.filter(item => item.id !== id),
     });
+  };
+
+  const calculateLineTotal = (item: LineItem): number => {
+    let subtotal = 0;
+    
+    // Use calculationType if available, otherwise fallback to old balcony logic
+    const calcType = item.calculationType || (item.type === 'balcony' ? 'perMeterWidth' : 'perSqm');
+    
+    if (calcType === 'perMeterWidth') {
+      // Per Meter (Width): (width / 1000) * pricePerSqm * quantity
+      const widthInMeters = item.width / 1000;
+      subtotal = widthInMeters * item.pricePerSqm * item.quantity;
+    } else if (calcType === 'perItem') {
+      // Per Item: pricePerSqm * quantity
+      subtotal = item.pricePerSqm * item.quantity;
+    } else {
+      // Per Sqm: area * pricePerSqm * quantity
+      const area = (item.width * item.height) / 1000000;
+      subtotal = area * item.pricePerSqm * item.quantity;
+    }
+    
+    return subtotal + (item.accessoryPrice || 0);
   };
 
   const handleCloseModal = () => {
@@ -366,7 +390,7 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
                   <div className="flex items-center justify-between">
                     <span className="text-gray-700">Line Total:</span>
                     <span className="text-xl text-blue-600">
-                      SCR {(((item.width * item.height / 1000000) * item.pricePerSqm) * item.quantity + (item.accessoryPrice || 0)).toFixed(2)}
+                      SCR {calculateLineTotal(item).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -452,6 +476,21 @@ export function DocumentForm({ documentData, onDataChange, products, customers, 
           </div>
         </div>
       </div>
+
+      {/* Save Quotation Section */}
+      {onSave && (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div className="p-6">
+            <button
+              onClick={onSave}
+              className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg"
+            >
+              <Save className="w-5 h-5" />
+              <span className="text-lg">{isEditing ? 'Update Quotation' : 'Save Quotation'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       <AddItemModal
         isOpen={isModalOpen}

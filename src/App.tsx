@@ -6,11 +6,13 @@ import { Products } from './components/Products';
 import { Customers } from './components/Customers';
 import { Documents } from './components/Documents';
 import { Styles } from './components/Styles';
-import { FileText, Receipt, FileCheck, LayoutDashboard, FilePlus, Package, Users, FolderOpen, Save, Edit2, Palette, Database, HardDrive } from 'lucide-react';
+import { Login } from './components/Login';
+import { UserManagement, AppUser } from './components/UserManagement';
+import { FileText, LayoutDashboard, FilePlus, Package, Users, FolderOpen, Edit2, Palette, Database, HardDrive, LogOut, UserCog, Shield, UserIcon } from 'lucide-react';
 import * as api from './utils/api';
 
 export type DocumentType = 'quotation' | 'invoice' | 'receipt';
-export type Page = 'dashboard' | 'create' | 'products' | 'customers' | 'documents' | 'styles';
+export type Page = 'dashboard' | 'create' | 'products' | 'customers' | 'documents' | 'styles' | 'users';
 
 export interface Product {
   id: string;
@@ -20,6 +22,7 @@ export interface Product {
   description: string;
   material: string;
   color: string;
+  calculationType?: 'perSqm' | 'perMeterWidth' | 'perItem';
 }
 
 export interface Glass {
@@ -88,6 +91,7 @@ export interface LineItem {
   style?: string;
   accessories?: string;
   accessoryPrice?: number; // Total price for accessories (price * quantity)
+  calculationType?: 'perSqm' | 'perMeterWidth' | 'perItem';
 }
 
 export interface DocumentData {
@@ -101,9 +105,20 @@ export interface DocumentData {
   notes: string;
   paymentAmount?: number;
   paymentStatus?: 'Completed' | 'Deposit Made';
+  paymentMethod?: 'CASH' | 'VISA' | 'CHEQUE';
+  paymentReference?: string;
+  additionalPayments?: Array<{
+    date: string;
+    method: 'CASH' | 'VISA' | 'CHEQUE';
+    reference?: string;
+    amount: number;
+  }>;
 }
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [documentType, setDocumentType] = useState<DocumentType>('quotation');
   const [products, setProducts] = useState<Product[]>([]);
@@ -136,6 +151,26 @@ export default function App() {
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
   const [storageMode, setStorageMode] = useState<'backend' | 'local'>(api.getStorageModePreference());
 
+  const handleLoginSuccess = (userId: string, role: 'admin' | 'user', email: string, name: string) => {
+    setIsLoggedIn(true);
+    setCurrentUser({
+      id: userId,
+      email,
+      name,
+      role,
+      createdAt: new Date().toISOString()
+    });
+  };
+
+  const handleLogout = async () => {
+    const { getSupabaseClient } = await import('./utils/supabase/client');
+    const supabase = getSupabaseClient();
+    await supabase.auth.signOut();
+    setIsLoggedIn(false);
+    setCurrentUser(null);
+    setCurrentPage('dashboard');
+  };
+
   const handleToggleStorageMode = async () => {
     const newMode = storageMode === 'backend' ? 'local' : 'backend';
     setStorageMode(newMode);
@@ -166,13 +201,36 @@ export default function App() {
   };
 
   useEffect(() => {
+    const checkSession = async () => {
+      const { getSupabaseClient } = await import('./utils/supabase/client');
+      const supabase = getSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        setIsLoggedIn(true);
+        setCurrentUser({
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || 'User',
+          role: session.user.user_metadata?.role || 'user',
+          createdAt: session.user.created_at || new Date().toISOString()
+        });
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
     const loadData = async () => {
       // Check backend status
       const status = await api.getBackendStatus();
       setBackendConnected(status);
       
       // Fetch all data from API
-      const [productsData, glassData, stylesData, coloursData, accessoriesData, customersData, documentsData] = await Promise.all([
+      const [productsData, glassData, stylesData, coloursData, accessoriesData, customersData, documentsData, usersData] = await Promise.all([
         api.fetchProducts(),
         api.fetchGlass(),
         api.fetchStyles(),
@@ -180,6 +238,7 @@ export default function App() {
         api.fetchAccessories(),
         api.fetchCustomers(),
         api.fetchDocuments(),
+        api.fetchUsers(),
       ]);
       
       setProducts(productsData);
@@ -189,6 +248,7 @@ export default function App() {
       setAccessories(accessoriesData);
       setCustomers(customersData);
       setSavedDocuments(documentsData);
+      setUsers(usersData);
 
       // Generate correct document number after loading saved documents
       const prefix = 'QT';
@@ -206,7 +266,16 @@ export default function App() {
     };
     
     loadData();
-  }, []);
+  }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (currentUser?.role !== 'admin') {
+      const adminOnlyPages: Page[] = ['products', 'styles', 'users'];
+      if (adminOnlyPages.includes(currentPage)) {
+        setCurrentPage('dashboard');
+      }
+    }
+  }, [currentPage, currentUser]);
 
   const handleDocumentTypeChange = (type: DocumentType) => {
     setDocumentType(type);
@@ -362,11 +431,25 @@ export default function App() {
   const navItems = [
     { id: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'create' as Page, label: 'Create', icon: FilePlus },
-    { id: 'products' as Page, label: 'Products', icon: Package },
+    { id: 'products' as Page, label: 'Products', icon: Package, adminOnly: true },
     { id: 'customers' as Page, label: 'Customers', icon: Users },
     { id: 'documents' as Page, label: 'Documents', icon: FolderOpen },
-    { id: 'styles' as Page, label: 'Styles', icon: Palette },
+    { id: 'styles' as Page, label: 'Styles', icon: Palette, adminOnly: true },
+    { id: 'users' as Page, label: 'Users', icon: UserCog, adminOnly: true },
   ];
+
+  // Filter nav items based on user role
+  const visibleNavItems = navItems.filter(item => {
+    if (item.adminOnly && currentUser?.role !== 'admin') {
+      return false;
+    }
+    return true;
+  });
+
+  // Show login page if not logged in
+  if (!isLoggedIn) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
@@ -379,12 +462,38 @@ export default function App() {
                   <Package className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-gray-900 tracking-tight">Aluminum Windows & Doors</h1>
-                  <p className="text-gray-500 mt-0.5 text-sm">Professional quotations, invoices, and receipts</p>
+                  <h1 className="text-gray-900 tracking-tight">HT Aluminium & Granite</h1>
+                  <p className="text-gray-500 mt-0.5 text-sm">Windows and Doors Manufacturer</p>
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
+              {/* User Profile & Logout */}
+              <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl border bg-white border-gray-200 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    currentUser?.role === 'admin' ? 'bg-purple-100' : 'bg-blue-100'
+                  }`}>
+                    {currentUser?.role === 'admin' ? (
+                      <Shield className="w-4 h-4 text-purple-600" />
+                    ) : (
+                      <UserIcon className="w-4 h-4 text-blue-600" />
+                    )}
+                  </div>
+                  <div className="text-sm">
+                    <div className="font-medium text-gray-900">{currentUser?.name}</div>
+                    <div className="text-xs text-gray-500 capitalize">{currentUser?.role}</div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="ml-2 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                  title="Logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+
               {/* Storage Mode Toggle Button */}
               <button
                 onClick={handleToggleStorageMode}
@@ -436,7 +545,7 @@ export default function App() {
       <nav className="bg-white/90 backdrop-blur-md border-b border-slate-200/60 sticky top-[89px] z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex gap-2">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -508,6 +617,8 @@ export default function App() {
                   styles={styles}
                   colours={colours}
                   accessories={accessories}
+                  onSave={handleSaveDocument}
+                  isEditing={isEditingDocument}
                 />
                 
                 {/* Preview Button for Mobile - Only show on mobile */}
@@ -549,6 +660,8 @@ export default function App() {
         )}
         
         {currentPage === 'styles' && <Styles styles={styles} onStylesChange={setStyles} colours={colours} onColoursChange={setColours} />}
+        
+        {currentPage === 'users' && currentUser && <UserManagement users={users} onUsersChange={setUsers} currentUserId={currentUser.id} />}
       </div>
 
       {/* Preview Modal */}

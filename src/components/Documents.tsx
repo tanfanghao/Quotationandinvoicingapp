@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { FileText, Receipt, FileCheck, Edit2, Trash2, FileInput, Search, Plus, Eye, DollarSign, X, Printer, Download, ZoomIn, ZoomOut, Wallet } from 'lucide-react';
+import { FileText, Receipt, FileCheck, Edit2, Trash2, FileInput, Search, Plus, Eye, DollarSign, X, Printer, Download, ZoomIn, ZoomOut, Wallet, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { DocumentData, DocumentType } from '../App';
 import { DocumentPreview } from './DocumentPreview';
-import { generatePDFHTML } from './generate-pdf-html';
+import { generatePDFFromElement } from '../utils/pdf-generator';
 import * as api from '../utils/api';
 
 interface DocumentsProps {
@@ -15,6 +15,8 @@ interface DocumentsProps {
 export function Documents({ documents, onDocumentsChange, onEditDocument, onCreateNew }: DocumentsProps) {
   const [filterType, setFilterType] = useState<'all' | 'quotation' | 'invoice' | 'receipt'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'documentNumber' | 'customer' | 'total'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [viewingDocument, setViewingDocument] = useState<DocumentData | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -28,13 +30,67 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   const [paymentReference, setPaymentReference] = useState('');
   const [zoomLevel, setZoomLevel] = useState(100);
 
-  const filteredDocuments = documents.filter(doc => {
-    const matchesType = filterType === 'all' || doc.documentType === filterType;
-    const matchesSearch = 
-      doc.documentNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.customer.name.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesType && matchesSearch;
-  });
+  const calculateTotal = (doc: DocumentData) => {
+    const itemsTotal = doc.lineItems.reduce((sum, item) => {
+      let areaTotal;
+      
+      // Use calculationType if available, otherwise fallback to old balcony logic
+      const calcType = item.calculationType || (item.type === 'balcony' ? 'perMeterWidth' : 'perSqm');
+      
+      if (calcType === 'perMeterWidth') {
+        // Per Meter (Width): (width / 1000) * pricePerSqm * quantity
+        const widthInMeters = item.width / 1000;
+        areaTotal = widthInMeters * item.pricePerSqm * item.quantity;
+      } else if (calcType === 'perItem') {
+        // Per Item: pricePerSqm * quantity
+        areaTotal = item.pricePerSqm * item.quantity;
+      } else {
+        // Per Sqm: area * pricePerSqm * quantity
+        const area = (item.width * item.height) / 1000000;
+        areaTotal = area * item.pricePerSqm * item.quantity;
+      }
+      
+      const accessoryTotal = item.accessoryPrice || 0;
+      return sum + areaTotal + accessoryTotal;
+    }, 0);
+    const totalWithTax = itemsTotal - doc.discount; // This is the tax-inclusive total
+    const subtotal = totalWithTax / 1.15; // Back-calculate subtotal (pre-tax amount)
+    const taxAmount = totalWithTax - subtotal; // Tax is the difference
+    return totalWithTax;
+  };
+
+  const filteredDocuments = documents
+    .filter(doc => {
+      const matchesType = filterType === 'all' || doc.documentType === filterType;
+      const matchesSearch = 
+        doc.documentNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        doc.customer.name.toLowerCase().includes(searchTerm.toLowerCase());
+      return matchesType && matchesSearch;
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortBy) {
+        case 'date':
+          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case 'documentNumber':
+          comparison = a.documentNumber.localeCompare(b.documentNumber);
+          break;
+        case 'customer':
+          comparison = a.customer.name.localeCompare(b.customer.name);
+          break;
+        case 'total':
+          comparison = calculateTotal(a) - calculateTotal(b);
+          break;
+      }
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+  const toggleSortDirection = () => {
+    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+  };
 
   const handleDelete = async (documentNumber: string) => {
     if (confirm('Are you sure you want to delete this document?')) {
@@ -48,21 +104,16 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   };
 
   const handleConvert = async (doc: DocumentData, newType: DocumentType) => {
-    // Generate new document number
+    // Extract the numeric part from the existing document number
+    const numericPart = doc.documentNumber.split('-')[1];
     const prefix = newType === 'invoice' ? 'INV' : 'REC';
-    const existingNumbers = documents
-      .filter(d => d.documentType === newType)
-      .map(d => parseInt(d.documentNumber.split('-')[1]))
-      .filter(num => !isNaN(num));
-    const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
-    const numberStr = nextNumber.toString().padStart(3, '0');
 
     const convertedDoc: DocumentData = {
       ...doc,
       documentType: newType,
-      documentNumber: `${prefix}-${numberStr}`,
+      documentNumber: `${prefix}-${numericPart}`,
       date: new Date().toISOString().split('T')[0],
-      notes: doc.notes + `\n\nConverted from ${doc.documentNumber}`,
+      notes: doc.notes, // Don't append conversion info
     };
 
     const success = await api.saveDocument(convertedDoc);
@@ -100,21 +151,16 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
   const handleConvertToInvoice = async () => {
     if (!convertingToInvoice) return;
 
-    // Generate new document number
+    // Extract the numeric part from the existing document number
+    const numericPart = convertingToInvoice.documentNumber.split('-')[1];
     const prefix = 'INV';
-    const existingNumbers = documents
-      .filter(d => d.documentType === 'invoice')
-      .map(d => parseInt(d.documentNumber.split('-')[1]))
-      .filter(num => !isNaN(num));
-    const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
-    const numberStr = nextNumber.toString().padStart(3, '0');
 
     const convertedDoc: DocumentData = {
       ...convertingToInvoice,
       documentType: 'invoice',
-      documentNumber: `${prefix}-${numberStr}`,
+      documentNumber: `${prefix}-${numericPart}`,
       date: new Date().toISOString().split('T')[0],
-      notes: convertingToInvoice.notes + `\\n\\nConverted from ${convertingToInvoice.documentNumber}`,
+      notes: convertingToInvoice.notes, // Don't append conversion info
     };
 
     const success = await api.saveDocument(convertedDoc);
@@ -149,30 +195,20 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
     // Determine payment status
     const paymentStatus: 'Completed' | 'Deposit Made' = paymentType === 'FULL' ? 'Completed' : 'Deposit Made';
 
-    // Generate new document number
+    // Extract the numeric part from the existing document number
+    const numericPart = convertingDocument.documentNumber.split('-')[1];
     const prefix = 'REC';
-    const existingNumbers = documents
-      .filter(d => d.documentType === 'receipt')
-      .map(d => parseInt(d.documentNumber.split('-')[1]))
-      .filter(num => !isNaN(num));
-    const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
-    const numberStr = nextNumber.toString().padStart(3, '0');
-
-    let paymentInfo = `Payment Method: ${paymentMethod}`;
-    if (paymentReference && (paymentMethod === 'VISA' || paymentMethod === 'CHEQUE')) {
-      const referenceLabel = paymentMethod === 'VISA' ? 'Card No.' : 'Cheque No.';
-      paymentInfo += `\n${referenceLabel}: ${paymentReference}`;
-    }
-    paymentInfo += `\nAmount Paid: $${paidAmount.toFixed(2)}\nTotal: $${total.toFixed(2)}`;
     
     const convertedDoc: DocumentData = {
       ...convertingDocument,
       documentType: 'receipt',
-      documentNumber: `${prefix}-${numberStr}`,
+      documentNumber: `${prefix}-${numericPart}`,
       date: new Date().toISOString().split('T')[0],
-      notes: convertingDocument.notes + `\n\nConverted from ${convertingDocument.documentNumber}\n${paymentInfo}`,
+      notes: convertingDocument.notes, // Don't append payment info
       paymentAmount: paidAmount,
       paymentStatus: paymentStatus,
+      paymentMethod: paymentMethod,
+      paymentReference: paymentReference || undefined,
     };
 
     const success = await api.saveDocument(convertedDoc);
@@ -216,18 +252,21 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
     const newTotalPaid = previousPayment + additionalPayment;
     const newPaymentStatus: 'Completed' | 'Deposit Made' = newTotalPaid >= total ? 'Completed' : 'Deposit Made';
 
-    let paymentInfo = `\n\nAdditional Payment on ${new Date().toLocaleDateString()}\nPayment Method: ${paymentMethod}`;
-    if (paymentReference && (paymentMethod === 'VISA' || paymentMethod === 'CHEQUE')) {
-      const referenceLabel = paymentMethod === 'VISA' ? 'Card No.' : 'Cheque No.';
-      paymentInfo += `\n${referenceLabel}: ${paymentReference}`;
-    }
-    paymentInfo += `\nAmount Paid: SCR ${additionalPayment.toFixed(2)}\nTotal Paid: SCR ${newTotalPaid.toFixed(2)}\nRemaining Balance: SCR ${(total - newTotalPaid).toFixed(2)}`;
+    // Store additional payment in the additionalPayments array
+    const existingAdditionalPayments = balanceDocument.additionalPayments || [];
+    const newAdditionalPayment = {
+      date: new Date().toISOString().split('T')[0],
+      method: paymentMethod,
+      reference: paymentReference || undefined,
+      amount: additionalPayment,
+    };
 
     const updatedDoc: DocumentData = {
       ...balanceDocument,
-      notes: balanceDocument.notes + paymentInfo,
+      notes: balanceDocument.notes, // Don't append payment info to notes
       paymentAmount: newTotalPaid,
       paymentStatus: newPaymentStatus,
+      additionalPayments: [...existingAdditionalPayments, newAdditionalPayment],
     };
 
     const success = await api.saveDocument(updatedDoc);
@@ -256,20 +295,6 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
     }
   };
 
-  const calculateTotal = (doc: DocumentData) => {
-    const itemsTotal = doc.lineItems.reduce((sum, item) => {
-      const area = (item.width * item.height) / 1000000; // Area in m²
-      const priceForOne = area * item.pricePerSqm; // Price for one item
-      const areaTotal = priceForOne * item.quantity; // Total for all items
-      const accessoryTotal = item.accessoryPrice || 0;
-      return sum + areaTotal + accessoryTotal;
-    }, 0);
-    const totalWithTax = itemsTotal - doc.discount; // This is the tax-inclusive total
-    const subtotal = totalWithTax / 1.15; // Back-calculate subtotal (pre-tax amount)
-    const taxAmount = totalWithTax - subtotal; // Tax is the difference
-    return totalWithTax;
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -289,7 +314,7 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
       </div>
 
       {/* Filters and Search */}
-      <div className="bg-white rounded-lg shadow-sm border p-4">
+      <div className="bg-white rounded-lg shadow-sm border p-4 space-y-4">
         <div className="flex flex-col sm:flex-row gap-4">
           {/* Search */}
           <div className="flex-1">
@@ -348,6 +373,64 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
               Receipts
             </button>
           </div>
+        </div>
+
+        {/* Sort Controls */}
+        <div className="flex items-center gap-3 pt-2 border-t">
+          <span className="text-gray-700 text-sm">Sort by:</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSortBy('date')}
+              className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                sortBy === 'date'
+                  ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                  : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              Date
+            </button>
+            <button
+              onClick={() => setSortBy('documentNumber')}
+              className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                sortBy === 'documentNumber'
+                  ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                  : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              Document #
+            </button>
+            <button
+              onClick={() => setSortBy('customer')}
+              className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                sortBy === 'customer'
+                  ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                  : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              Customer
+            </button>
+            <button
+              onClick={() => setSortBy('total')}
+              className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                sortBy === 'total'
+                  ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                  : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              Total
+            </button>
+          </div>
+          <button
+            onClick={toggleSortDirection}
+            className="ml-auto p-2 rounded-lg bg-gray-50 border border-gray-200 hover:bg-gray-100 transition-colors"
+            title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+          >
+            {sortDirection === 'asc' ? (
+              <ArrowUp className="w-4 h-4 text-gray-700" />
+            ) : (
+              <ArrowDown className="w-4 h-4 text-gray-700" />
+            )}
+          </button>
         </div>
       </div>
 
@@ -514,54 +597,46 @@ export function Documents({ documents, onDocumentsChange, onEditDocument, onCrea
               
               <div className="flex items-center gap-2">
                 <button
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    const button = e.currentTarget;
+                    const originalHTML = button.innerHTML;
                     try {
-                      // Import libraries
-                      const { default: jsPDF } = await import('jspdf');
-                      const { default: html2canvas } = await import('html2canvas');
-                      
-                      // Create a clean HTML structure with inline styles (no Tailwind classes)
-                      const wrapper = document.createElement('div');
-                      wrapper.style.cssText = `
-                        position: absolute;
-                        left: -9999px;
-                        top: 0;
-                        background: #ffffff;
-                        padding: 24px;
-                        width: 794px;
-                        font-family: system-ui, -apple-system, sans-serif;
-                        color: #000000;
+                      // Show loading state
+                      button.disabled = true;
+                      button.innerHTML = `
+                        <svg class="w-4 h-4 animate-spin inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="ml-2">Generating PDF...</span>
                       `;
-
-                      wrapper.innerHTML = generatePDFHTML(viewingDocument);
                       
-                      document.body.appendChild(wrapper);
-
-                      const canvas = await html2canvas(wrapper, {
-                        scale: 2,
-                        useCORS: true,
-                        logging: false,
-                        backgroundColor: '#ffffff'
-                      });
-
-                      document.body.removeChild(wrapper);
-
-                      const imgData = canvas.toDataURL('image/png');
-                      const pdf = new jsPDF('p', 'mm', 'a4');
-                      const pdfWidth = pdf.internal.pageSize.getWidth();
-                      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-                      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                      pdf.save(`${viewingDocument.documentNumber}.pdf`);
+                      // Generate PDF
+                      await generatePDFFromElement('document-preview-pdf', `${viewingDocument.documentNumber}.pdf`);
+                      
+                      // Show success
+                      button.innerHTML = `
+                        <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        <span class="ml-2">PDF Downloaded!</span>
+                      `;
+                      
+                      setTimeout(() => {
+                        button.disabled = false;
+                        button.innerHTML = originalHTML;
+                      }, 2500);
                     } catch (error) {
                       console.error('Error generating PDF:', error);
-                      alert('Failed to generate PDF. Please try again.');
+                      button.disabled = false;
+                      button.innerHTML = originalHTML;
+                      alert('Failed to generate PDF. Please try using your browser\'s print function (Ctrl+P or Cmd+P) and save as PDF instead.');
                     }
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="w-4 h-4" />
-                  Download
+                  Download PDF
                 </button>
                 <button
                   onClick={() => window.print()}

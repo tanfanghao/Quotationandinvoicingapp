@@ -33,9 +33,24 @@ export function Dashboard({ onNavigate, products, customers, documents }: Dashbo
       
       // For other documents, calculate the total
       const itemsTotal = doc.lineItems.reduce((itemSum, item) => {
-        const area = (item.width * item.height) / 1000000; // Area in m²
-        const priceForOne = area * item.pricePerSqm; // Price for one item
-        const areaTotal = priceForOne * item.quantity; // Total for all items
+        let areaTotal;
+        
+        // Use calculationType if available, otherwise fallback to old balcony logic
+        const calcType = item.calculationType || (item.type === 'balcony' ? 'perMeterWidth' : 'perSqm');
+        
+        if (calcType === 'perMeterWidth') {
+          // Per Meter (Width): (width / 1000) * pricePerSqm * quantity
+          const widthInMeters = item.width / 1000;
+          areaTotal = widthInMeters * item.pricePerSqm * item.quantity;
+        } else if (calcType === 'perItem') {
+          // Per Item: pricePerSqm * quantity
+          areaTotal = item.pricePerSqm * item.quantity;
+        } else {
+          // Per Sqm: area * pricePerSqm * quantity
+          const area = (item.width * item.height) / 1000000;
+          areaTotal = area * item.pricePerSqm * item.quantity;
+        }
+        
         const accessoryTotal = item.accessoryPrice || 0;
         return itemSum + areaTotal + accessoryTotal;
       }, 0);
@@ -102,15 +117,29 @@ export function Dashboard({ onNavigate, products, customers, documents }: Dashbo
     },
   ];
 
-  // Get 5 most recent documents
+  // Get all documents sorted by document number in descending order
   const recentDocuments = [...documents]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 5)
+    .sort((a, b) => b.documentNumber.localeCompare(a.documentNumber))
     .map(doc => {
       const itemsTotal = doc.lineItems.reduce((sum, item) => {
-        const area = (item.width * item.height) / 1000000; // Area in m²
-        const priceForOne = area * item.pricePerSqm; // Price for one item
-        const areaTotal = priceForOne * item.quantity; // Total for all items
+        let areaTotal;
+        
+        // Use calculationType if available, otherwise fallback to old balcony logic
+        const calcType = item.calculationType || (item.type === 'balcony' ? 'perMeterWidth' : 'perSqm');
+        
+        if (calcType === 'perMeterWidth') {
+          // Per Meter (Width): (width / 1000) * pricePerSqm * quantity
+          const widthInMeters = item.width / 1000;
+          areaTotal = widthInMeters * item.pricePerSqm * item.quantity;
+        } else if (calcType === 'perItem') {
+          // Per Item: pricePerSqm * quantity
+          areaTotal = item.pricePerSqm * item.quantity;
+        } else {
+          // Per Sqm: area * pricePerSqm * quantity
+          const area = (item.width * item.height) / 1000000;
+          areaTotal = area * item.pricePerSqm * item.quantity;
+        }
+        
         const accessoryTotal = item.accessoryPrice || 0;
         return sum + areaTotal + accessoryTotal;
       }, 0);

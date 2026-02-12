@@ -28,7 +28,7 @@ let forceLocalStorage = false; // Manual override to use localStorage
 // Get user's storage mode preference
 export function getStorageModePreference(): 'backend' | 'local' {
   const preference = localStorage.getItem(STORAGE_KEYS.STORAGE_MODE_PREFERENCE);
-  return (preference as 'backend' | 'local') || 'backend';
+  return (preference as 'backend' | 'local') || 'backend'; // Default to backend/database mode
 }
 
 // Set user's storage mode preference
@@ -773,6 +773,96 @@ export async function deleteAccessory(id: string): Promise<boolean> {
     }
   } catch (error) {
     console.error('Error deleting accessory:', error);
+    return false;
+  }
+}
+
+// ===== USERS =====
+
+export async function fetchUsers(): Promise<any[]> {
+  try {
+    if (backendAvailable && !forceLocalStorage) {
+      const response = await fetch(`${API_BASE}/users`, { headers });
+      if (!response.ok) {
+        console.log('Backend not available for users, using empty array');
+        return [];
+      }
+      const data = await response.json();
+      return data.users || [];
+    } else {
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    return [];
+  }
+}
+
+export async function createUser(email: string, password: string, name: string, role: 'admin' | 'user'): Promise<boolean> {
+  try {
+    if (backendAvailable && !forceLocalStorage) {
+      const response = await fetch(`${API_BASE}/users`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email, password, name, role }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('Error creating user:', error);
+        return false;
+      }
+      return true;
+    } else {
+      console.log('Backend not available - cannot create users without backend');
+      return false;
+    }
+  } catch (error) {
+    console.error('Error creating user:', error);
+    return false;
+  }
+}
+
+export async function updateUser(user: any): Promise<boolean> {
+  try {
+    if (backendAvailable && !forceLocalStorage) {
+      const response = await fetch(`${API_BASE}/users/${user.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ email: user.email, name: user.name, role: user.role }),
+      });
+      if (!response.ok) {
+        console.error('Error updating user');
+        return false;
+      }
+      return true;
+    } else {
+      console.log('Backend not available - cannot update users without backend');
+      return false;
+    }
+  } catch (error) {
+    console.error('Error updating user:', error);
+    return false;
+  }
+}
+
+export async function deleteUser(id: string): Promise<boolean> {
+  try {
+    if (backendAvailable && !forceLocalStorage) {
+      const response = await fetch(`${API_BASE}/users/${id}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (!response.ok) {
+        console.error('Error deleting user');
+        return false;
+      }
+      return true;
+    } else {
+      console.log('Backend not available - cannot delete users without backend');
+      return false;
+    }
+  } catch (error) {
+    console.error('Error deleting user:', error);
     return false;
   }
 }

@@ -25,6 +25,7 @@ export function Products({ products, onProductsChange, glass, onGlassChange, acc
     name: '',
     type: 'window',
     pricePerSqm: 0,
+    calculationType: 'perSqm',
   });
   const [glassFormData, setGlassFormData] = useState<Omit<Glass, 'id'>>({
     name: '',
@@ -107,6 +108,7 @@ export function Products({ products, onProductsChange, glass, onGlassChange, acc
       description: product.description,
       material: product.material,
       color: product.color,
+      calculationType: product.calculationType,
     });
     setShowAddForm(true);
   };
@@ -222,6 +224,7 @@ export function Products({ products, onProductsChange, glass, onGlassChange, acc
       name: '',
       type: 'window',
       pricePerSqm: 0,
+      calculationType: 'perSqm',
     });
   };
 
@@ -391,7 +394,18 @@ export function Products({ products, onProductsChange, glass, onGlassChange, acc
                     min="0"
                   />
                 </div>
-                
+                <div>
+                  <label className="block text-gray-700 mb-2">Calculation Type</label>
+                  <select
+                    value={formData.calculationType || 'perSqm'}
+                    onChange={(e) => setFormData({ ...formData, calculationType: e.target.value as 'perSqm' | 'perMeterWidth' | 'perItem' })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="perSqm">Per Sqm</option>
+                    <option value="perMeterWidth">Per Meter (Width)</option>
+                    <option value="perItem">Per Item</option>
+                  </select>
+                </div>
               </div>
               <div className="flex gap-3 justify-end">
                 <button

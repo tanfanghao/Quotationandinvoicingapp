@@ -43,6 +43,7 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
         glass: editingItem.glass || '',
         style: editingItem.style || '',
         accessories: editingItem.accessories || '',
+        calculationType: editingItem.calculationType,
       });
       setSelectedProductId('');
     } else {
@@ -113,6 +114,7 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
             pricePerSqm: product.pricePerSqm,
             colour: product.color,
             description: `${product.name} - ${product.material}${formData.colour ? ', ' + formData.colour : ''}${formData.glass ? ', ' + formData.glass : ''}${formData.style ? ', ' + formData.style : ''}`,
+            calculationType: product.calculationType,
           });
           setBasePrice(product.pricePerSqm); // Set base price
         }
@@ -192,10 +194,26 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
     return ((formData.width * formData.height) / 1000000).toFixed(2);
   };
 
+  const calculateSubtotal = () => {
+    // Use calculationType if available, otherwise fallback to old balcony logic
+    const calcType = formData.calculationType || (formData.type === 'balcony' ? 'perMeterWidth' : 'perSqm');
+    
+    if (calcType === 'perMeterWidth') {
+      // Per Meter (Width): (width / 1000) * pricePerSqm * quantity
+      const widthInMeters = formData.width / 1000;
+      return widthInMeters * formData.pricePerSqm * formData.quantity;
+    } else if (calcType === 'perItem') {
+      // Per Item: pricePerSqm * quantity
+      return formData.pricePerSqm * formData.quantity;
+    } else {
+      // Per Sqm: area * pricePerSqm * quantity
+      const area = (formData.width * formData.height) / 1000000;
+      return area * formData.pricePerSqm * formData.quantity;
+    }
+  };
+
   const calculateTotal = () => {
-    const area = (formData.width * formData.height) / 1000000; // Area in m²
-    const priceForOne = area * formData.pricePerSqm; // Price for one item
-    const areaTotal = priceForOne * formData.quantity; // Total for all items
+    const areaTotal = calculateSubtotal();
     const accessoryTotal = formData.accessoryPrice || 0;
     return (areaTotal + accessoryTotal).toFixed(2);
   };
@@ -454,7 +472,7 @@ export function AddItemModal({ isOpen, onClose, onSave, editingItem, products, g
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 space-y-3">
                 <div className="flex items-center justify-between text-gray-700">
                   <span>Sub-Total</span>
-                  <span className="text-gray-900">SCR {(((formData.width * formData.height) / 1000000 * formData.pricePerSqm) * formData.quantity).toFixed(2)}</span>
+                  <span className="text-gray-900">SCR {calculateSubtotal().toFixed(2)}</span>
                 </div>
                 {formData.accessoryPrice && formData.accessoryPrice > 0 && (
                   <div className="flex items-center justify-between text-gray-700">

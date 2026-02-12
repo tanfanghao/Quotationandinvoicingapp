@@ -2,6 +2,7 @@ import { Hono } from "npm:hono";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import * as kv from "./kv_store.tsx";
+
 const app = new Hono();
 
 // Enable logger
@@ -22,6 +23,130 @@ app.use(
 // Health check endpoint
 app.get("/make-server-ad0536e6/health", (c) => {
   return c.json({ status: "ok" });
+});
+
+// ===== AUTH & USERS =====
+
+// Create a new user
+app.post("/make-server-ad0536e6/users", async (c) => {
+  try {
+    const { email, password, name, role } = await c.req.json();
+    
+    const { createClient } = await import("npm:@supabase/supabase-js");
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      user_metadata: { 
+        name,
+        role: role || 'user'
+      },
+      email_confirm: true
+    });
+    
+    if (error) {
+      console.log(`Error creating user: ${error.message}`);
+      return c.json({ error: error.message }, 400);
+    }
+    
+    return c.json({ success: true, user: data.user });
+  } catch (error) {
+    console.log(`Error in create user: ${error}`);
+    return c.json({ error: "Failed to create user", details: String(error) }, 500);
+  }
+});
+
+// Get all users
+app.get("/make-server-ad0536e6/users", async (c) => {
+  try {
+    const { createClient } = await import("npm:@supabase/supabase-js");
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    
+    const { data, error } = await supabase.auth.admin.listUsers();
+    
+    if (error) {
+      console.log(`Error fetching users: ${error.message}`);
+      return c.json({ error: error.message }, 400);
+    }
+    
+    // Transform to our user format
+    const users = data.users.map(user => ({
+      id: user.id,
+      email: user.email || '',
+      name: user.user_metadata?.name || 'Unknown',
+      role: user.user_metadata?.role || 'user',
+      createdAt: user.created_at
+    }));
+    
+    return c.json({ users });
+  } catch (error) {
+    console.log(`Error fetching users: ${error}`);
+    return c.json({ error: "Failed to fetch users", details: String(error) }, 500);
+  }
+});
+
+// Update user
+app.put("/make-server-ad0536e6/users/:id", async (c) => {
+  try {
+    const userId = c.req.param('id');
+    const { email, name, role } = await c.req.json();
+    
+    const { createClient } = await import("npm:@supabase/supabase-js");
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    
+    const { data, error } = await supabase.auth.admin.updateUserById(
+      userId,
+      {
+        email,
+        user_metadata: { name, role }
+      }
+    );
+    
+    if (error) {
+      console.log(`Error updating user: ${error.message}`);
+      return c.json({ error: error.message }, 400);
+    }
+    
+    return c.json({ success: true, user: data.user });
+  } catch (error) {
+    console.log(`Error updating user: ${error}`);
+    return c.json({ error: "Failed to update user", details: String(error) }, 500);
+  }
+});
+
+// Delete user
+app.delete("/make-server-ad0536e6/users/:id", async (c) => {
+  try {
+    const userId = c.req.param('id');
+    
+    const { createClient } = await import("npm:@supabase/supabase-js");
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    
+    const { error } = await supabase.auth.admin.deleteUser(userId);
+    
+    if (error) {
+      console.log(`Error deleting user: ${error.message}`);
+      return c.json({ error: error.message }, 400);
+    }
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.log(`Error deleting user: ${error}`);
+    return c.json({ error: "Failed to delete user", details: String(error) }, 500);
+  }
 });
 
 // ===== PRODUCTS =====
